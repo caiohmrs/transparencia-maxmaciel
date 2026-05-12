@@ -138,10 +138,6 @@
 
 * [Ceilândia] [Cultura] Batalhas de Rimas: 4 batalhas contempladas pelo Edital 'Invadindo a Cena'.
 
-### Orçamento
-
-* [Ceilândia] [Orçamento] Planilha de Orçamento: https://docs.google.com/spreadsheets/d/1WJfmjwMzD50BBNfGhpML5O96m8x_YnGjSPIyyTCL4Gk/edit?gid=175310534#gid=175310534
-
 ---
 
 ## Sol Nascente / Pôr do Sol
