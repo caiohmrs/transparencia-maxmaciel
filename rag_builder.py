@@ -2,6 +2,7 @@ import os
 import faiss
 import numpy as np
 import docx2txt
+from ollama import Client  # Mantido para compatibilidade futura, embora não seja usado aqui
 from sentence_transformers import SentenceTransformer
 
 # ---------------------------------
@@ -17,29 +18,34 @@ DOC_PATH = "DADOS R.A - COMUNICAÇÃO.docx"
 
 
 # ------------------------------------------------------------------------
-# Função de lazy‑loading do modelo (evita download na importação)
+# Modelo de embedding – carregado uma única vez (comportamento da versão original)
 # ------------------------------------------------------------------------
-def _get_model() -> SentenceTransformer:
+model_embedding = SentenceTransformer(
+    MODEL_NAME, trust_remote_code=True, device="cpu"
+)
+
+# Função helper mantida apenas para compatibilidade com `rag_chat.py`
+def _get_model() -> SentenceTransformer:   # pragma: no cover
     """
-    Retorna um objeto SentenceTransformer cacheado.
-    Na primeira chamada o modelo é baixado e carregado; nas chamadas subsequentes
-    o mesmo objeto já está em memória.
+    Retorna o modelo de embedding já carregado.
+    Mantém a assinatura original para que outros módulos possam importar.
     """
-    if not hasattr(_get_model, "model"):
-        # Força uso de CPU (ou GPU se preferir mudar para "cuda")
-        _get_model.model = SentenceTransformer(
-            MODEL_NAME, trust_remote_code=True, device="cpu"
-        )
-    return _get_model.model
+    return model_embedding
 
 
-def _processar_documento() -> list[str]:
-    """Lê o DOCX e devolve a lista de fragmentos já processados."""
+def preparar_conhecimento_ra() -> list[str]:
+    """
+    Processa o documento DOCX e devolve a lista de fragmentos de conhecimento
+    (mesmo que a implementação original). Levanta FileNotFoundError se o
+    arquivo não for encontrado.
+    """
     if not os.path.exists(DOC_PATH):
         raise FileNotFoundError(f"Arquivo {DOC_PATH} não encontrado.")
 
-    conteudo = docx2txt.process(DOC_PATH)
-    textos = []
+    print("📖 Processando documento...")
+    conteudo_docx = docx2txt.process(DOC_PATH)
+
+    textos_processados: list[str] = []
     ra_atual = "Distrito Federal"
     cidades_alvo = [
         "Planaltina",
@@ -53,49 +59,55 @@ def _processar_documento() -> list[str]:
         "Brazlândia",
     ]
 
-    for linha in conteudo.split("\n"):
-        linha = linha.strip()
-        if not linha:
+    for linha in conteudo_docx.split("\n"):
+        linha_limpa = linha.strip()
+        if not linha_limpa:
             continue
 
-        # Detecta mudança de região
-        if any(c.lower() in linha.lower() for c in cidades_alvo) and len(linha) < 45:
-            ra_atual = linha
+        # Detecta mudança de região (mesmo critério da versão original)
+        if any(c.lower() in linha_limpa.lower() for c in cidades_alvo) and len(linha_limpa) < 45:
+            ra_atual = linha_limpa
             continue
 
-        # Apenas linhas relevantes entram como fragmento
-        if len(linha) > 12:
-            textos.append(f"Região: {ra_atual} | Detalhe: {linha}")
+        # Linhas relevantes são transformadas em fragmentos
+        if len(linha_limpa) > 12:
+            textos_processados.append(f"Região: {ra_atual} | Detalhe: {linha_limpa}")
 
-    return textos
+    return textos_processados
 
 
 def carregar_base_rag() -> tuple[faiss.Index, list[str]]:
     """
-    Carrega (ou cria) o índice FAISS e a lista de textos.
-    Retorna (index, base_texto).
+    Carrega (ou cria) o índice FAISS e a lista de textos exatamente como a
+    implementação original fazia, incluindo persistência em disco.
+    Retorna um tuple (index, base_texto).
     """
-    # 1️⃣ Caso já exista no disco, carrega
+    # -------------------------------------------------
+    # 1️⃣ Verifica se já há artefatos persistidos
+    # -------------------------------------------------
     if os.path.exists(INDEX_FILE) and os.path.exists(TEXTS_FILE):
         index = faiss.read_index(INDEX_FILE)
         base_texto = np.load(TEXTS_FILE, allow_pickle=True).tolist()
-        print("✅ Base RAG carregada a partir de arquivos persistidos.")
+        print("✅ Base de vetores carregada a partir de arquivos persistidos.")
         return index, base_texto
 
-    # 2️⃣ Caso contrário, gera a base a partir do DOCX
-    print("✨ Gerando nova base RAG...")
-    base_texto = _processar_documento()
+    # -------------------------------------------------
+    # 2️⃣ Caso contrário, gera tudo do zero
+    # -------------------------------------------------
+    print("✨ Gerando nova base otimizada...")
+    base_texto = preparar_conhecimento_ra()
 
+    # Gera os embeddings usando o modelo já carregado
     print(f"🧠 Gerando embeddings para {len(base_texto)} fragmentos...")
-    embeddings = _get_model().encode(base_texto, show_progress_bar=True)
+    embeddings = model_embedding.encode(base_texto, show_progress_bar=True)
     print("✅ Embeddings gerados. Construindo índice FAISS...")
 
+    # Cria o índice plano L2 (mesmo tipo da versão original)
     index = faiss.IndexFlatL2(embeddings.shape[1])
     index.add(np.array(embeddings).astype("float32"))
 
-    # Persiste para reutilização futura
+    # Persiste ambos para reutilização futura
     faiss.write_index(index, INDEX_FILE)
     np.save(TEXTS_FILE, base_texto)
-
     print("✅ Base RAG criada e persistida.")
     return index, base_texto
