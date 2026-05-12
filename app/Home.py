@@ -85,15 +85,15 @@ CARD_STYLE = """
 @st.cache_data(show_spinner=False)
 def _resumir_texto_ollama(texto: str) -> str:
     """
-    Envia *texto* ao modelo Ollama (gpt‑oss:120b) e devolve um
-    resumo conciso. O cache garante que o mesmo fragmento não seja
-    processado duas vezes na mesma sessão.
+    Envia *texto* ao modelo Ollama (gpt‑oss:120b) e devolve um resumo
+    conciso. O cache evita chamadas repetidas para o mesmo fragmento.
     """
     if not texto:
         return ""
 
     # Prompt que orienta o modelo a criar um resumo objetivo,
-    # mantendo as áreas de interesse (Educação, Saúde, etc.).
+    # mantendo as áreas de interesse (Educação, Saúde, Infraestrutura,
+    # Cultura, Mobilidade e Participação Comunitária).
     prompt = (
         "Resuma o texto a seguir, mantendo os principais pontos de "
         "Educação, Saúde, Infraestrutura, Cultura, Mobilidade e "
@@ -104,12 +104,24 @@ def _resumir_texto_ollama(texto: str) -> str:
 
     messages = [{"role": "user", "content": prompt}]
 
-    # Usamos ``stream=False`` para obter a resposta completa de uma vez.
-    resposta = ""
-    for parte in client.chat(model="gpt-oss:120b", messages=messages, stream=False):
-        resposta = parte["message"]["content"]
-        break
-    return resposta.strip()
+    # -----------------------------------------------------------------
+    # O cliente Ollama devolve um dicionário (ou uma tupla contendo o
+    # dicionário) quando stream=False.  Não devemos iterar sobre ele.
+    # -----------------------------------------------------------------
+    resp = client.chat(model="gpt-oss:120b", messages=messages, stream=False)
+
+    # Se a resposta vier embrulhada numa tupla/lista, pegue o primeiro item
+    if isinstance(resp, (list, tuple)):
+        resp = resp[0] if resp else {}
+
+    # Caso a resposta já seja um dicionário, extraímos o conteúdo da mensagem
+    try:
+        resumo = resp["message"]["content"]
+    except (KeyError, TypeError):
+        # Falha graciosa – devolve o texto original (ou uma string vazia)
+        resumo = texto
+
+    return resumo.strip()
 
 
 # -------------------------------------------------
