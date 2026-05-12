@@ -111,3 +111,25 @@ def carregar_base_rag() -> tuple[faiss.Index, list[str]]:
     np.save(TEXTS_FILE, base_texto)
     print("✅ Base RAG criada e persistida.")
     return index, base_texto
+
+
+# -------------------------------------------------
+# Execução direta (quando o usuário roda `python rag_builder.py`)
+# -------------------------------------------------
+if __name__ == "__main__":
+    """
+    Quando o módulo é executado como script, carregamos (ou geramos) a base RAG
+    e exibimos um pequeno resumo para o usuário.
+    """
+    # Carrega ou cria a base de vetores
+    index, base_texto = carregar_base_rag()
+
+    # Informações resumidas
+    total_fragments = len(base_texto)
+    total_vectors = index.ntotal if hasattr(index, "ntotal") else "desconhecido"
+    print(
+        f"\n📊 Resumo da base carregada:\n"
+        f"  • Fragmentos de texto : {total_fragments}\n"
+        f"  • Vetores no índice   : {total_vectors}\n"
+        f"  • Arquivos persistidos: {INDEX_FILE}, {TEXTS_FILE}\n"
+    )
