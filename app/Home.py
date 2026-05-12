@@ -3,94 +3,50 @@ import re
 import streamlit as st
 
 # -------------------------------------------------
-# 1️⃣  Leitura e parsing de `feitos.md`
+# 1️⃣  Leitura completa de `feitos.md`
 # -------------------------------------------------
 FEITOS_MD_PATH = pathlib.Path(__file__).parent.parent / "feitos.md"
 
 
-def _parse_feitos_md(path: pathlib.Path) -> dict[str, list[dict[str, str]]]:
+def _carregar_feitos_bruto(path: pathlib.Path) -> dict[str, str]:
     """
-    Analisa o markdown `feitos.md` e devolve um dicionário:
+    Lê o markdown ``feitos.md`` e devolve um dicionário:
 
-            {
-                "Planaltina - DF": [
-                    {"area": "Educação", "texto": "Foram Indicados via emenda parlamentar ..."},
-                    {"area": "Infraestrutura", "texto": "Indicação para melhoria da iluminação pública ..."},
-                    {"area": "Saúde", "texto": "Indicação de recursos para melhorias na área da saúde ..."},
-                ],
-                "São Sebastião": [...],
-                ...
-            }
+        {
+            "Planaltina - DF": "<texto completo da região>",
+            "São Sebastião": "<texto completo da região>",
+            "Gama": "<texto completo da região>",
+            "Ceilândia": "<texto completo da região>",
+            ...
+        }
 
-    Regras de extração:
-    • Cada região começa com “!Nome da RA”.
-    • O próximo cabeçalho (linha curta, sem pontuação) indica a área (ex.: Educação, Saúde).
-    • Linhas que iniciam com “•”, “-” ou “*” são descrições de feitos.
-    • São mantidos, por ordem de aparição, até três feitos diferentes por área.
+    O arquivo está estruturado com marcadores “!Nome da RA”.
+    Tudo que vem depois do marcador até o próximo marcador
+    (ou fim‑de‑arquivo) é considerado o **conteúdo bruto** da região.
     """
     if not path.is_file():
         st.error(f"Arquivo de fatos não encontrado: {path}")
         return {}
 
     raw = path.read_text(encoding="utf-8")
-
-    # Divide o conteúdo por região (marca “!” no início da linha)
+    # Separa por linhas que começam com “!” (início de cada região)
     sections = re.split(r"^!", raw, flags=re.MULTILINE)
 
-    data: dict[str, list[dict[str, str]]] = {}
-
+    regioes: dict[str, str] = {}
     for sec in sections:
         sec = sec.strip()
         if not sec:
             continue
-
         lines = sec.splitlines()
-        ra_name = lines[0].strip()
-        # Normaliza possíveis travessões
-        ra_name = ra_name.replace("\u2013", "-")
-
-        items: list[dict[str, str]] = []
-        current_area: str | None = None
-
-        for line in lines[1:]:
-            line = line.strip()
-            if not line:
-                continue
-
-            # Detecta cabeçalhos de área (linhas curtas e sem pontuação)
-            if re.fullmatch(r"[A-Za-zÀ-ÿ ]+", line) and line.lower() not in {
-                "ações realizadas",
-                "resultados e impactos",
-                "destaque específico da região administrativa",
-                "atividade",
-                "participação comunitária",
-            }:
-                current_area = line
-                continue
-
-            # Detecta marcadores de bullet
-            if line.startswith(("•", "-", "*")):
-                if current_area is None:
-                    current_area = "Outros"
-                texto = line.lstrip("•-* ").strip()
-                # Evita ultrapassar 3 itens por mesma área
-                area_items = [i for i in items if i["area"] == current_area]
-                if len(area_items) < 3:
-                    items.append({"area": current_area, "texto": texto})
-
-        # Garante ao menos 3 itens (preenche com placeholder se necessário)
-        if len(items) < 3:
-            filler = "Informação resumida da região."
-            while len(items) < 3:
-                items.append({"area": "Outros", "texto": filler})
-
-        data[ra_name] = items
-
-    return data
+        nome_ra = lines[0].strip().replace("\u2013", "-")
+        # Junta todo o restante da seção como texto bruto
+        conteudo = "\n".join(lines[1:]).strip()
+        regioes[nome_ra] = conteudo
+    return regioes
 
 
-# Carrega os fatos ao iniciar o módulo
-FEITOS_POR_RA = _parse_feitos_md(FEITOS_MD_PATH)
+# Carrega todo o conteúdo já no momento da importação – é apenas leitura de texto
+FEITOS_POR_RA = _carregar_feitos_bruto(FEITOS_MD_PATH)
 
 # -------------------------------------------------
 # CSS para estilizar os cards
@@ -132,7 +88,7 @@ def page():
     # 1️⃣ Seletor de Regiões Administrativas
     # -------------------------------------------------
     todas_regioes = sorted(FEITOS_POR_RA.keys())
-    # Seleciona como padrão as quatro regiões citadas no pedido
+    # Mantemos como padrão as quatro regiões pedidas
     default_sel = [
         ra
         for ra in todas_regioes
@@ -151,23 +107,16 @@ def page():
         return
 
     # -------------------------------------------------
-    # 2️⃣ Renderiza os cards por região selecionada
+    # 2️⃣ Exibe o conteúdo **bruto** de cada região escolhida
     # -------------------------------------------------
     for ra in regioes_escolhidas:
         st.subheader(f"🗺️ {ra}")
-        itens = FEITOS_POR_RA.get(ra, [])
-        n_cols = 3
-        cols = st.columns(n_cols)
-
-        for idx, item in enumerate(itens[:3]):  # máximo de 3 cards por região
-            col = cols[idx % n_cols]
-            card_html = f"""
-            <div class="card">
-                <h3>{item["area"]}</h3>
-                <p>{item["texto"]}</p>
-            </div>
-            """
-            col.markdown(card_html, unsafe_allow_html=True)
+        # O markdown já vem formatado (bullets, negritos, etc.)
+        conteudo = FEITOS_POR_RA.get(ra, "")
+        if conteudo:
+            st.markdown(conteudo)
+        else:
+            st.info("Nenhum conteúdo encontrado para esta região.")
 
     st.info(
         "Explore a aba **Detalhes** para buscar informações específicas "
