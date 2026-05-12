@@ -1,62 +1,47 @@
 import streamlit as st
-import numpy as np
-from rag_builder import _get_model   # para gerar a query
-from rag_chat import client          # cliente Ollama configurado
-from . import get_rag                # cache de índice e textos
-
-def _gerar_resposta(duvida: str, index, base_texto) -> str:
-    """
-    Usa a mesma lógica de rag_chat.responder_pergunta, porém devolve
-    a resposta completa como string.
-    """
-    instrucao = "Represent this query for retrieving relevant documents"
-    query_input = f"Instruct: {instrucao}\nQuery: {duvida}"
-    query_vec = _get_model().encode([query_input])
-
-    _, idxs = index.search(np.array(query_vec).astype("float32"), k=15)
-    contexto = "\n".join([base_texto[i] for i in idxs[0]])
-
-    prompt = f"""
-Você é o Assistente Especial de Comunicação do Mandato. Sua missão é transformar dados técnicos
-em respostas claras, entusiasmadas e informativas para o cidadão.
-
-### REGRAS DE OURO:
-1. EXAUSTIVIDADE – cite tudo que o contexto mencionar.
-2. ORGANIZAÇÃO – estruture em tópicos (🏥 Saúde, 🎓 Educação, 🏗️ Infraestrutura…).
-3. TOM – solícito, positivo e institucional.
-4. DESTAQUE FINANCEIRO – valores em **NEGRITO**.
-5. FIDELIDADE – use apenas o CONTEXTO abaixo; se não houver informação, diga que não localizou.
-
-### CONTEXTO RECUPERADO:
-{contexto}
-
-### PERGUNTA DO CIDADÃO:
-{duvida}
-
-RESPOSTA ESTRUTURADA:
-"""
-
-    messages = [{"role": "user", "content": prompt}]
-    resposta = ""
-    for parte in client.chat(model="gpt-oss:120b", messages=messages, stream=True):
-        resposta += parte["message"]["content"]
-    return resposta
-
+from rag_chat import gerar_resposta_streaming
+from . import get_rag
 
 def page():
-    st.title("💬 Converse com a IA do Mandato")
+    st.title("💬 MAX.IA - O Assistente do Mandato")
     st.write(
-        "Faça perguntas ao assistente. O contexto será recuperado do nosso "
-        "repositório documental e a resposta será gerada pelo modelo Ollama."
+        "Eu sou a **MAX.IA**, seu assistente virtual para tudo sobre as ações do mandato. "
+        "O contexto será recuperado do nosso repositório documental oficial."
     )
 
-    pergunta = st.text_area("Sua pergunta", height=120, key="chat_input")
-    enviar = st.button("Enviar")
+    # Inicializa o histórico de mensagens se não existir
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
 
-    if enviar and pergunta:
-        index, base_texto = get_rag()   # cacheado
-        with st.spinner("Processando…"):
-            resposta = _gerar_resposta(pergunta, index, base_texto)
+    # Exibe as mensagens do histórico
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"], avatar="max.png" if message["role"] == "assistant" else None):
+            st.markdown(message["content"])
 
-        st.markdown("**🤖 Resposta:**")
-        st.write(resposta)
+    # Input do usuário
+    if prompt := st.chat_input("O que deseja saber sobre as ações do mandato?"):
+        # Adiciona a mensagem do usuário ao histórico
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        
+        # Exibe a mensagem do usuário
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        # Resposta do assistente
+        with st.chat_message("assistant", avatar="max.png"):
+            index, base_texto = get_rag()
+            
+            # Placeholder para o streaming
+            response_placeholder = st.empty()
+            full_response = ""
+            
+            # Gera a resposta usando a lógica unificada
+            for fragmento in gerar_resposta_streaming(prompt, index, base_texto):
+                full_response += fragmento
+                response_placeholder.markdown(full_response + "▌")
+            
+            # Finaliza a exibição
+            response_placeholder.markdown(full_response)
+        
+        # Adiciona a resposta completa ao histórico
+        st.session_state.messages.append({"role": "assistant", "content": full_response})

@@ -20,8 +20,8 @@ def gerar():
 
     # Verifica se os artefatos realmente foram gravados
     if not (Path(INDEX_FILE).exists() and Path(TEXTS_FILE).exists()):
-        sys.exit("❌ Falha ao gravar os arquivos de índice.")
-    print("\n✅ Artefatos gerados:")
+        sys.exit("[ERRO] Falha ao gravar os arquivos de índice.")
+    print("\n[OK] Artefatos gerados:")
     print(f"   • {INDEX_FILE} → {Path(INDEX_FILE).stat().st_size/1e6:.1f} MB")
     print(f"   • {TEXTS_FILE} → {Path(TEXTS_FILE).stat().st_size/1e6:.1f} MB")
 
@@ -31,7 +31,7 @@ def commit():
     subprocess.run(["git", "add", INDEX_FILE, TEXTS_FILE], check=True)
     mensagem = "🗂️ Atualiza índice RAG + textos (gerado automaticamente)"
     subprocess.run(["git", "commit", "-m", mensagem], check=True)
-    print("✅ Commit realizado.")
+    print("[OK] Commit realizado.")
 
 
 if __name__ == "__main__":

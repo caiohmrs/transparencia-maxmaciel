@@ -1,185 +1,130 @@
 import pathlib
-import re
 import streamlit as st
-# O cliente já está configurado em rag_chat.py; reutilizamos aqui.
+import json
+import os
 from rag_chat import client
 
 # -------------------------------------------------
-# 1️⃣  Leitura completa de `feitos.md`
+# 1️⃣ Configurações de Caminho e Cache Persistente
 # -------------------------------------------------
-FEITOS_MD_PATH = pathlib.Path(__file__).parent.parent / "feitos.md"
+DADOS_MD_PATH = pathlib.Path(__file__).parent.parent / "DADOS_RA_ORGANIZADO.md"
+CACHE_RESUMOS_PATH = pathlib.Path(__file__).parent.parent / "resumos_cache.json"
 
+def _carregar_cache_persistente() -> dict:
+    if CACHE_RESUMOS_PATH.exists():
+        with open(CACHE_RESUMOS_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
 
-def _carregar_feitos_bruto(path: pathlib.Path) -> dict[str, str]:
+def _salvar_no_cache_persistente(cache: dict):
+    with open(CACHE_RESUMOS_PATH, "w", encoding="utf-8") as f:
+        json.dump(cache, f, ensure_ascii=False, indent=4)
+
+def _carregar_dados_ra() -> dict[str, str]:
     """
-    Lê o markdown ``feitos.md`` e devolve um dicionário:
-
-        {
-            "Planaltina - DF": "<texto completo da região>",
-            "São Sebastião": "<texto completo da região>",
-            "Gama": "<texto completo da região>",
-            "Ceilândia": "<texto completo da região>",
-            ...
-        }
-
-    O arquivo está estruturado com marcadores “!Nome da RA”.
-    Tudo que vem depois do marcador até o próximo marcador
-    (ou fim‑de‑arquivo) é considerado o **conteúdo bruto** da região.
+    Lê o markdown organizado e devolve um dicionário {Nome_RA: conteúdo_markdown}.
     """
-    if not path.is_file():
-        st.error(f"Arquivo de fatos não encontrado: {path}")
+    if not DADOS_MD_PATH.is_file():
+        st.error(f"Arquivo de dados não encontrado: {DADOS_MD_PATH}")
         return {}
 
-    raw = path.read_text(encoding="utf-8")
-    # Separa por linhas que começam com “!” (início de cada região)
-    sections = re.split(r"^!", raw, flags=re.MULTILINE)
+    with open(DADOS_MD_PATH, "r", encoding="utf-8") as f:
+        content = f.read()
 
-    regioes: dict[str, str] = {}
+    sections = content.split("\n## ")
+    regioes = {}
+    
     for sec in sections:
-        sec = sec.strip()
-        if not sec:
+        if sec.startswith("#"):
             continue
-        lines = sec.splitlines()
-        nome_ra = lines[0].strip().replace("\u2013", "-")
-        # Junta todo o restante da seção como texto bruto
-        conteudo = "\n".join(lines[1:]).strip()
-        regioes[nome_ra] = conteudo
+        lines = sec.strip().split("\n")
+        if not lines:
+            continue
+        nome_ra = lines[0].strip()
+        conteudo_ra = "\n".join(lines[1:]).strip()
+        if conteudo_ra.endswith("---"):
+            conteudo_ra = conteudo_ra[:-3].strip()
+        regioes[nome_ra] = conteudo_ra
     return regioes
 
+# -------------------------------------------------
+# 2️⃣ Lógica de Resumo e Exibição
+# -------------------------------------------------
 
-# Carrega todo o conteúdo já no momento da importação – é apenas leitura de texto
-FEITOS_POR_RA = _carregar_feitos_bruto(FEITOS_MD_PATH)
-
-# -------------------------------------------------
-# CSS para estilizar os cards
-# -------------------------------------------------
-CARD_STYLE = """
-<style>
-.card {
-    background: #ffffff;
-    border-radius: 8px;
-    box-shadow: 0 2px 6px rgba(0,0,0,0.12);
-    padding: 1.2rem;
-    margin-bottom: 1rem;
-    transition: transform 0.1s ease;
-}
-.card:hover {
-    transform: translateY(-2px);
-}
-.card h3 {
-    margin-top: 0;
-    margin-bottom: 0.4rem;
-    color: #0e1117;
-}
-.card p {
-    margin: 0;
-    color: #333333;
-    line-height: 1.4;
-}
-</style>
-"""
-
-# -------------------------------------------------
-# 2️⃣ Função que chama o modelo Ollama para resumir um texto
-# -------------------------------------------------
-@st.cache_data(show_spinner=False)
-def _resumir_texto_ollama(texto: str) -> str:
+def _obter_resumo_ia(ra_nome: str, texto_completo: str) -> str:
     """
-    Envia *texto* ao modelo Ollama (gpt‑oss:120b) e devolve um resumo
-    conciso. O cache evita chamadas repetidas para o mesmo fragmento.
+    Obtém o resumo: primeiro tenta no cache persistente (JSON),
+    se não houver, gera com o LLM e salva.
     """
-    if not texto:
-        return ""
-
-    # Prompt que orienta o modelo a criar um resumo objetivo,
-    # mantendo as áreas de interesse (Educação, Saúde, Infraestrutura,
-    # Cultura, Mobilidade e Participação Comunitária).
-    prompt = (
-        "Resuma o texto a seguir, mantendo os principais pontos de "
-        "Educação, Saúde, Infraestrutura, Cultura, Mobilidade e "
-        "Participação Comunitária. Use linguagem clara e objetiva, em "
-        "até três frases curtas.\n\n"
-        f"{texto}"
-    )
-
-    messages = [{"role": "user", "content": prompt}]
-
-    # -----------------------------------------------------------------
-    # O cliente Ollama devolve um dicionário (ou uma tupla contendo o
-    # dicionário) quando stream=False.  Não devemos iterar sobre ele.
-    # -----------------------------------------------------------------
-    resp = client.chat(model="gpt-oss:120b", messages=messages, stream=False)
-
-    # Se a resposta vier embrulhada numa tupla/lista, pegue o primeiro item
-    if isinstance(resp, (list, tuple)):
-        resp = resp[0] if resp else {}
-
-    # Caso a resposta já seja um dicionário, extraímos o conteúdo da mensagem
-    try:
-        resumo = resp["message"]["content"]
-    except (KeyError, TypeError):
-        # Falha graciosa – devolve o texto original (ou uma string vazia)
-        resumo = texto
-
-    return resumo.strip()
-
-
-# -------------------------------------------------
-# Página principal
-# -------------------------------------------------
-def page():
-    st.title("🏛️ Mandato – Principais feitos")
-    st.markdown(CARD_STYLE, unsafe_allow_html=True)
-
-    # -------------------------------------------------
-    # 1️⃣ Seletor de Regiões Administrativas
-    # -------------------------------------------------
-    todas_regioes = sorted(FEITOS_POR_RA.keys())
-    # Mantemos como padrão as quatro regiões pedidas
-    default_sel = [
-        ra
-        for ra in todas_regioes
-        if ra.lower().startswith(
-            ("planaltina", "são sebastião", "são sebastiao", "gama", "ceilândia", "ceilanda")
+    cache = _carregar_cache_persistente()
+    
+    # Se já temos o resumo salvo para esta RA, retornamos ele
+    if ra_nome in cache:
+        return cache[ra_nome]
+    
+    # Caso contrário, geramos com o LLM
+    with st.spinner(f"Gerando resumo IA para {ra_nome}..."):
+        prompt = (
+            "Você é um Analista de Comunicação focado em síntese executiva. "
+            "Sua tarefa é ler os dados de ações parlamentares e criar um resumo "
+            "EXTREMAMENTE CURTO e direto ao ponto.\n\n"
+            "REGRAS:\n"
+            "1. Use 5 tópicos curtos e impactantes.\n"
+            "2. Use verbos de ação no presente ou pretérito (ex: 'Garantimos', 'Transformamos', 'Conquistamos').\n"
+            "3. Cada tópico deve focar no benefício real para a comunidade (ex: 'X escolas reformadas', 'Mais ônibus para o IFB').\n"
+            "4. Mantenha um tom entusiasmado, focado em prestação de contas e direitos sociais.\n\n"
+            f"DADOS DE {ra_nome}:\n{texto_completo}"
         )
-    ]
-    regioes_escolhidas = st.multiselect(
-        "Selecione as Regiões Administrativas que deseja visualizar",
-        options=todas_regioes,
-        default=default_sel,
+        
+        try:
+            resp = client.chat(model="gpt-oss:120b", messages=[{"role": "user", "content": prompt}], stream=False)
+            resumo = resp["message"]["content"].strip()
+            
+            # Salva no cache para a próxima vez
+            cache[ra_nome] = resumo
+            _salvar_no_cache_persistente(cache)
+            return resumo
+        except Exception as e:
+            return f"Resumo temporariamente indisponível. Erro: {e}"
+
+def page():
+    st.title("🏛️ Painel Geral do Mandato")
+    
+    st.write(
+        "Bem-vindo ao portal de transparência. Aqui você encontra uma visão consolidada "
+        "das ações realizadas em cada Região Administrativa."
     )
 
-    if not regioes_escolhidas:
-        st.warning("Selecione ao menos uma Região Administrativa.")
+    dados_ra = _carregar_dados_ra()
+    if not dados_ra:
+        st.warning("Nenhum dado disponível no momento.")
         return
 
-    # -------------------------------------------------
-    # 2️⃣ Exibe **resumo** (card) + texto completo opcional
-    # -------------------------------------------------
-    for ra in regioes_escolhidas:
-        st.subheader(f"🗺️ {ra}")
-        conteudo = FEITOS_POR_RA.get(ra, "")
+    ra_list = sorted(dados_ra.keys())
+    
+    if not ra_list:
+        st.info("Nenhuma região encontrada no documento.")
+        return
 
-        if not conteudo:
-            st.info("Nenhum conteúdo encontrado para esta região.")
-            continue
+    # Criação das abas dinâmicas baseadas nas RAs encontradas
+    tabs = st.tabs([f"📍 {ra}" for ra in ra_list])
 
-        # ---- Resumo (card) -------------------------------------------------
-        resumo = _resumir_texto_ollama(conteudo)
-        col = st.columns(1)[0]   # usar coluna única para ocupar a largura total
-        card_html = f"""
-        <div class="card">
-            <h3>Resumo da região</h3>
-            <p>{resumo}</p>
-        </div>
-        """
-        col.markdown(card_html, unsafe_allow_html=True)
+    for i, ra in enumerate(ra_list):
+        with tabs[i]:
+            conteudo = dados_ra[ra]
+            
+            # Obtém resumo (do cache ou gera novo)
+            resumo = _obter_resumo_ia(ra, conteudo)
+            
+            # Renderização do Card com Markdown interno para garantir os bullets
+            st.markdown(f"""<div class="ra-card"><h3>✨ RESUMO EXECUTIVO</h3>
 
-        # ---- Texto completo (expander opcional) -------------------------------
-        with st.expander("Ver detalhes completos"):
-            st.markdown(conteudo)
-
+{resumo}
+</div>""", unsafe_allow_html=True)
+            
+    st.divider()
     st.info(
-        "Explore a aba **Detalhes** para buscar informações específicas "
-        "ou a aba **Chat IA** para conversar com o assistente."
+        "Explore a aba **Busca detalhada** para filtrar ações por tema "
+        "ou a aba **MAX.IA** para conversar com nosso assistente virtual."
     )
+    st.caption("Dados atualizados com base no relatório de atividades do mandato.")

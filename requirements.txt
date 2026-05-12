@@ -3,3 +3,4 @@ faiss-cpu
 sentence-transformers
 docx2txt
 ollama
+numpy

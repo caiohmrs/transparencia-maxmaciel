@@ -5,3 +5,7 @@
 config.yaml
 start_aider.py
 venv
+.idea
+__pycache__
+.aider.tags.cache.v4
+.streamlit/secrets.toml

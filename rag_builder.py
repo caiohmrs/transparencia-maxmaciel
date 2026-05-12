@@ -1,135 +1,76 @@
 import os
 import faiss
 import numpy as np
-import docx2txt
-from ollama import Client  # Mantido para compatibilidade futura, embora não seja usado aqui
 from sentence_transformers import SentenceTransformer
 
 # ---------------------------------
-# Configurações (mesmas do rag.py)
+# Configurações
 # ---------------------------------
-# Modelo de embedding – pode ser trocado por uma versão menor se desejar.
-MODEL_NAME = "Qwen/Qwen3-Embedding-0.6B"   # <- deixar assim ou substituir por modelo mais leve
-
-# Arquivos de persistência
+MODEL_NAME = "Qwen/Qwen3-Embedding-0.6B"
 INDEX_FILE = "mandato_index.faiss"
 TEXTS_FILE = "mandato_textos.npy"
-DOC_PATH = "DADOS R.A - COMUNICAÇÃO.docx"
 
+# Usar o arquivo Markdown que já está formatado para RAG
+DOC_PATH = "DADOS_RA_ORGANIZADO.md"
 
-# ------------------------------------------------------------------------
-# Modelo de embedding – carregado uma única vez (comportamento da versão original)
-# ------------------------------------------------------------------------
+# Modelo de embedding
 model_embedding = SentenceTransformer(
     MODEL_NAME, trust_remote_code=True, device="cpu"
 )
 
-# Função helper mantida apenas para compatibilidade com `rag_chat.py`
-def _get_model() -> SentenceTransformer:   # pragma: no cover
+# Adicione isso no rag_builder.py
+def _get_model() -> SentenceTransformer:
     """
-    Retorna o modelo de embedding já carregado.
-    Mantém a assinatura original para que outros módulos possam importar.
+    Retorna o modelo de embedding já carregado para ser usado no chat.
     """
     return model_embedding
 
 
 def preparar_conhecimento_ra() -> list[str]:
-    """
-    Processa o documento DOCX e devolve a lista de fragmentos de conhecimento
-    (mesmo que a implementação original). Levanta FileNotFoundError se o
-    arquivo não for encontrado.
-    """
     if not os.path.exists(DOC_PATH):
         raise FileNotFoundError(f"Arquivo {DOC_PATH} não encontrado.")
 
-    print("📖 Processando documento...")
-    conteudo_docx = docx2txt.process(DOC_PATH)
+    print("[INFO] Lendo Markdown otimizado...")
 
     textos_processados: list[str] = []
-    ra_atual = "Distrito Federal"
-    cidades_alvo = [
-        "Planaltina",
-        "São Sebastião",
-        "Sol Nascente",
-        "Gama",
-        "Ceilândia",
-        "Arapoanga",
-        "Pôr do Sol",
-        "Estrutural",
-        "Brazlândia",
-    ]
 
-    for linha in conteudo_docx.split("\n"):
-        linha_limpa = linha.strip()
-        if not linha_limpa:
-            continue
+    with open(DOC_PATH, "r", encoding="utf-8") as f:
+        for linha in f:
+            linha_limpa = linha.strip()
 
-        # Detecta mudança de região (mesmo critério da versão original)
-        if any(c.lower() in linha_limpa.lower() for c in cidades_alvo) and len(linha_limpa) < 45:
-            ra_atual = linha_limpa
-            continue
+            # Captura apenas as linhas de conteúdo (que começam com o marcador de lista do Markdown)
+            if linha_limpa.startswith("* ["):
+                # Remove o '*' inicial e limpa espaços
+                conteudo = linha_limpa.lstrip("* ").strip()
+                # O formato já é "[RA] [Tema] Detalhe", perfeito para o Embedder
+                textos_processados.append(conteudo)
 
-        # Linhas relevantes são transformadas em fragmentos
-        if len(linha_limpa) > 12:
-            textos_processados.append(f"Região: {ra_atual} | Detalhe: {linha_limpa}")
-
+    print(f"[OK] {len(textos_processados)} fragmentos extraídos com sucesso.")
     return textos_processados
 
 
 def carregar_base_rag() -> tuple[faiss.Index, list[str]]:
-    """
-    Carrega (ou cria) o índice FAISS e a lista de textos exatamente como a
-    implementação original fazia, incluindo persistência em disco.
-    Retorna um tuple (index, base_texto).
-    """
-    # -------------------------------------------------
-    # 1️⃣ Verifica se já há artefatos persistidos
-    # -------------------------------------------------
     if os.path.exists(INDEX_FILE) and os.path.exists(TEXTS_FILE):
         index = faiss.read_index(INDEX_FILE)
         base_texto = np.load(TEXTS_FILE, allow_pickle=True).tolist()
-        print("✅ Base de vetores carregada a partir de arquivos persistidos.")
+        print("[OK] Base de vetores carregada do disco.")
         return index, base_texto
 
-    # -------------------------------------------------
-    # 2️⃣ Caso contrário, gera tudo do zero
-    # -------------------------------------------------
-    print("✨ Gerando nova base otimizada...")
+    print("[INFO] Gerando nova base RAG...")
     base_texto = preparar_conhecimento_ra()
 
-    # Gera os embeddings usando o modelo já carregado
-    print(f"🧠 Gerando embeddings para {len(base_texto)} fragmentos...")
+    print("[INFO] Gerando embeddings...")
     embeddings = model_embedding.encode(base_texto, show_progress_bar=True)
-    print("✅ Embeddings gerados. Construindo índice FAISS...")
 
-    # Cria o índice plano L2 (mesmo tipo da versão original)
     index = faiss.IndexFlatL2(embeddings.shape[1])
     index.add(np.array(embeddings).astype("float32"))
 
-    # Persiste ambos para reutilização futura
     faiss.write_index(index, INDEX_FILE)
     np.save(TEXTS_FILE, base_texto)
-    print("✅ Base RAG criada e persistida.")
+    print("[OK] Base RAG criada e persistida.")
     return index, base_texto
 
 
-# -------------------------------------------------
-# Execução direta (quando o usuário roda `python rag_builder.py`)
-# -------------------------------------------------
 if __name__ == "__main__":
-    """
-    Quando o módulo é executado como script, carregamos (ou geramos) a base RAG
-    e exibimos um pequeno resumo para o usuário.
-    """
-    # Carrega ou cria a base de vetores
     index, base_texto = carregar_base_rag()
-
-    # Informações resumidas
-    total_fragments = len(base_texto)
-    total_vectors = index.ntotal if hasattr(index, "ntotal") else "desconhecido"
-    print(
-        f"\n📊 Resumo da base carregada:\n"
-        f"  • Fragmentos de texto : {total_fragments}\n"
-        f"  • Vetores no índice   : {total_vectors}\n"
-        f"  • Arquivos persistidos: {INDEX_FILE}, {TEXTS_FILE}\n"
-    )
+    print(f"Total de Fragmentos: {len(base_texto)}")

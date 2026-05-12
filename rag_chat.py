@@ -1,68 +1,112 @@
-import os
+import streamlit as st
 import numpy as np
 import faiss
 from ollama import Client
+from typing import Generator
+
+# Importamos o carregador e o helper do modelo que definimos no rag_builder
 from rag_builder import carregar_base_rag, _get_model
 
 # -------------------------------------------------
-# Configurações de cliente Ollama (mantém as mesmas)
+# Configurações de cliente Ollama
 # -------------------------------------------------
+# Busca a chave no st.secrets (padrão Streamlit)
+try:
+    OLLAMA_KEY = st.secrets["OLLAMA_API_KEY"]
+except:
+    OLLAMA_KEY = ""
+
 client = Client(
     host="https://ollama.com",
     headers={
-        "Authorization": "Bearer "
-        + os.environ.get(
-            "OLLAMA_API_KEY",
-            "91873b17f533488fa3b62007d2955db7.vaT1FcSBOlXolWjmrvt80SyS",
-        )
+        "Authorization": f"Bearer {OLLAMA_KEY}"
     },
 )
+
+# Configurações globais
+MODEL_LLM = "gpt-oss:120b"
+
+
+def obter_contexto(duvida: str, index: faiss.Index, base_texto: list[str], k: int = 15) -> str:
+    """
+    Realiza a busca semântica e retorna o contexto formatado.
+    """
+    instrucao = "Represent this query for retrieving relevant documents"
+    query_input = f"Instruct: {instrucao}\nQuery: {duvida}"
+
+    model = _get_model()
+    query_vector = model.encode([query_input])
+
+    # Busca os k fragmentos mais próximos
+    _, indices = index.search(np.array(query_vector).astype("float32"), k=k)
+
+    # Monta o contexto
+    contexto_recuperado = "\n".join([base_texto[i] for i in indices[0]])
+    return contexto_recuperado
+
+
+def gerar_resposta_streaming(
+    duvida: str, index: faiss.Index, base_texto: list[str]
+) -> Generator[str, None, None]:
+    """
+    Gerador que encapsula a lógica de RAG e streaming do Ollama.
+    """
+    contexto = obter_contexto(duvida, index, base_texto)
+
+    prompt = f"""
+    Você é um Auditor de Dados Parlamentares. Sua prioridade absoluta é a precisão geográfica. Você prefere dizer que não sabe a dar uma resposta de uma cidade errada.
+
+    ### 🛡️ REGRAS DE OURO DE VALIDAÇÃO:
+    1. **FILTRO DE LOCALIDADE ESTREITO:** Analise a PERGUNTA e o CONTEXTO. Se o usuário perguntou sobre uma cidade (ex: Guará) e o contexto fala de outra (ex: Ceilândia), você NÃO deve responder com os dados da outra, mesmo que os nomes sejam parecidos.
+    2. **VERIFICAÇÃO DE "MATCH":** Antes de escrever qualquer item, confirme se ele está listado abaixo do título da Região Administrativa correta no contexto.
+    3. **EXAUSTIVIDADE LITERAL:** Se a cidade for a correta, liste todos os itens individualmente (escolas, praças, obras). Não agrupe nem resuma. 
+    4. **DESTAQUE FINANCEIRO:** Valores (R$) e "Emendas" devem estar em **NEGRITO**.
+
+    ### 📝 FORMATO DE RESPOSTA:
+    **[NOME DA REGIÃO ADMINISTRATIVA]**
+    * 📂 **[CATEGORIA]**
+        * ✅ [Ação detalhada exatamente como no texto]
+        * 💰 **Investimento:** [Valor se houver]
+
+    ---
+    ### CONTEXTO RECUPERADO PARA ANÁLISE:
+    {contexto}
+
+    ### PERGUNTA DO CIDADÃO:
+    {duvida}
+
+    RESPOSTA DO AUDITOR:
+    """
+
+    messages = [{"role": "user", "content": prompt}]
+
+    try:
+        for parte in client.chat(model=MODEL_LLM, messages=messages, stream=True):
+            yield parte["message"]["content"]
+    except Exception as e:
+        yield f"\n❌ Erro na comunicação com a IA: {e}"
 
 
 def responder_pergunta(
     duvida: str, index: faiss.Index, base_texto: list[str]
 ) -> None:
     """
-    Busca os fragmentos mais relevantes no índice e devolve a resposta da IA.
+    Versão para terminal (CLI) da resposta.
     """
-    # --------- Busca local ----------
-    instrucao = "Represent this query for retrieving relevant documents"
-    query_input = f"Instruct: {instrucao}\nQuery: {duvida}"
-    query_vector = _get_model().encode([query_input])
-
-    _, indices = index.search(np.array(query_vector).astype("float32"), k=10)
-    contexto = "\n".join([base_texto[i] for i in indices[0]])
-
-    # --------- Prompt para Ollama ----------
-    prompt = f"""
-    Use o contexto abaixo para responder à pergunta de forma completa.
-    Liste todas as ações mencionadas que forem relevantes.
-
-    CONTEXTO:
-    {contexto}
-
-    PERGUNTA:
-    {duvida}
-    """
-
-    messages = [{"role": "user", "content": prompt}]
-
-    print("\n🤖 Resposta do Mandato:\n" + "-" * 30)
-
-    # Streaming (mesma lógica do arquivo original)
-    for parte in client.chat(model="gpt-oss:120b", messages=messages, stream=True):
-        print(parte["message"]["content"], end="", flush=True)
-
+    print("\n[AI] Resposta do Mandato:\n" + "-" * 30)
+    for fragmento in gerar_resposta_streaming(duvida, index, base_texto):
+        print(fragmento, end="", flush=True)
     print("\n" + "-" * 30)
 
 
 def main() -> None:
-    """Entrada interativa – carrega a base e entra em loop de perguntas."""
     index, base_texto = carregar_base_rag()
+    print("[INFO] Sistema RAG Mandato Ativo! (Digite 'sair' para encerrar)")
 
     while True:
-        p = input("\nO que deseja saber sobre o mandato? (ou 'sair' para encerrar) ").strip()
+        p = input("\nO que deseja saber sobre as ações do mandato? ").strip()
         if not p or p.lower() == "sair":
+            print("Encerrando... Até logo!")
             break
         responder_pergunta(p, index, base_texto)
 
