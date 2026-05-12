@@ -1,6 +1,8 @@
 import pathlib
 import re
 import streamlit as st
+# O cliente já está configurado em rag_chat.py; reutilizamos aqui.
+from rag_chat import client
 
 # -------------------------------------------------
 # 1️⃣  Leitura completa de `feitos.md`
@@ -78,6 +80,39 @@ CARD_STYLE = """
 """
 
 # -------------------------------------------------
+# 2️⃣ Função que chama o modelo Ollama para resumir um texto
+# -------------------------------------------------
+@st.cache_data(show_spinner=False)
+def _resumir_texto_ollama(texto: str) -> str:
+    """
+    Envia *texto* ao modelo Ollama (gpt‑oss:120b) e devolve um
+    resumo conciso. O cache garante que o mesmo fragmento não seja
+    processado duas vezes na mesma sessão.
+    """
+    if not texto:
+        return ""
+
+    # Prompt que orienta o modelo a criar um resumo objetivo,
+    # mantendo as áreas de interesse (Educação, Saúde, etc.).
+    prompt = (
+        "Resuma o texto a seguir, mantendo os principais pontos de "
+        "Educação, Saúde, Infraestrutura, Cultura, Mobilidade e "
+        "Participação Comunitária. Use linguagem clara e objetiva, em "
+        "até três frases curtas.\n\n"
+        f"{texto}"
+    )
+
+    messages = [{"role": "user", "content": prompt}]
+
+    # Usamos ``stream=False`` para obter a resposta completa de uma vez.
+    resposta = ""
+    for parte in client.chat(model="gpt-oss:120b", messages=messages, stream=False):
+        resposta = parte["message"]["content"]
+        break
+    return resposta.strip()
+
+
+# -------------------------------------------------
 # Página principal
 # -------------------------------------------------
 def page():
@@ -107,16 +142,30 @@ def page():
         return
 
     # -------------------------------------------------
-    # 2️⃣ Exibe o conteúdo **bruto** de cada região escolhida
+    # 2️⃣ Exibe **resumo** (card) + texto completo opcional
     # -------------------------------------------------
     for ra in regioes_escolhidas:
         st.subheader(f"🗺️ {ra}")
-        # O markdown já vem formatado (bullets, negritos, etc.)
         conteudo = FEITOS_POR_RA.get(ra, "")
-        if conteudo:
-            st.markdown(conteudo)
-        else:
+
+        if not conteudo:
             st.info("Nenhum conteúdo encontrado para esta região.")
+            continue
+
+        # ---- Resumo (card) -------------------------------------------------
+        resumo = _resumir_texto_ollama(conteudo)
+        col = st.columns(1)[0]   # usar coluna única para ocupar a largura total
+        card_html = f"""
+        <div class="card">
+            <h3>Resumo da região</h3>
+            <p>{resumo}</p>
+        </div>
+        """
+        col.markdown(card_html, unsafe_allow_html=True)
+
+        # ---- Texto completo (expander opcional) -------------------------------
+        with st.expander("Ver detalhes completos"):
+            st.markdown(conteudo)
 
     st.info(
         "Explore a aba **Detalhes** para buscar informações específicas "
