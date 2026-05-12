@@ -1,0 +1,7 @@
+.env
+.aider.input.history
+.aider.conf.yml
+.aider.chat.history.md
+config.yaml
+start_aider.py
+venv
