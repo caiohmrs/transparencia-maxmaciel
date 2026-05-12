@@ -234,22 +234,48 @@ BRAND_CSS = """
     }
 
     /* Estilo das Mensagens de Chat */
-    [data-testid="stChatMessage"]:nth-child(even) {
-        background-color: #FFD700 !important; /* Ouro para Assistant */
-        color: #1A1A1A !important;
-        border: 2px solid #1A1A1A;
-        border-radius: 0px 15px 15px 15px;
-    }
-    
-    [data-testid="stChatMessage"]:nth-child(odd) {
-        background-color: #D1D5DB !important; /* Cinza Metálico para User */
-        color: #1A1A1A !important;
-        border: 2px solid #1A1A1A;
-        border-radius: 15px 15px 0px 15px;
+    [data-testid="stChatMessage"] {
+        display: flex !important;
+        flex-direction: row !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        margin-bottom: 20px !important;
+        box-sizing: border-box !important;
+        padding: 15px !important;
+        overflow-x: hidden !important; /* Evita o scroll horizontal */
     }
 
-    [data-testid="stChatMessage"] p {
-        color: inherit !important;
+    [data-testid="stChatMessage"] [data-testid="stMarkdownContainer"] {
+        width: 100% !important;
+        overflow-wrap: break-word !important;
+        word-wrap: break-word !important;
+        hyphens: auto !important;
+    }
+
+    /* Cores das Mensagens */
+    [data-testid="stChatMessage"][aria-label="Chat message from user"] {
+        background-color: #D1D5DB !important; /* Cinza Metálico */
+        border-radius: 15px 15px 0px 15px !important;
+        border: 2px solid #1A1A1A !important;
+    }
+
+    [data-testid="stChatMessage"][aria-label="Chat message from assistant"] {
+        background-color: #FFD700 !important; /* Ouro */
+        border-radius: 0px 15px 15px 15px !important;
+        border: 2px solid #1A1A1A !important;
+    }
+
+    [data-testid="stChatMessage"] p, [data-testid="stChatMessage"] li {
+        color: #1A1A1A !important;
+        font-size: 0.95rem !important;
+        line-height: 1.4 !important;
+        word-break: break-word !important;
+    }
+
+    /* Ajuste para listas dentro do chat */
+    [data-testid="stChatMessage"] ul {
+        padding-left: 20px !important;
+        margin: 10px 0 !important;
     }
 
 </style>
