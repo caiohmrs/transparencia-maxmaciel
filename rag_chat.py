@@ -2,7 +2,7 @@ import os
 import numpy as np
 import faiss
 from ollama import Client
-from rag_builder import carregar_base_rag, model_embedding
+from rag_builder import carregar_base_rag, _get_model
 
 # -------------------------------------------------
 # Configurações de cliente Ollama (mantém as mesmas)
@@ -28,7 +28,7 @@ def responder_pergunta(
     # --------- Busca local ----------
     instrucao = "Represent this query for retrieving relevant documents"
     query_input = f"Instruct: {instrucao}\nQuery: {duvida}"
-    query_vector = model_embedding.encode([query_input])
+    query_vector = _get_model().encode([query_input])
 
     _, indices = index.search(np.array(query_vector).astype("float32"), k=10)
     contexto = "\n".join([base_texto[i] for i in indices[0]])
