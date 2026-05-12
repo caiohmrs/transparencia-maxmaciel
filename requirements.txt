@@ -1,7 +1,5 @@
-faiss-cpu>=1.7.4
-numpy
-docx2txt
+streamlit>=1.30
+faiss-cpu
 sentence-transformers
-python-dotenv
-PyYAML
+docx2txt
 ollama

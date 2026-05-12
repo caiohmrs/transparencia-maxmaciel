@@ -1,0 +1,2 @@
+mandato_index.faiss filter=lfs diff=lfs merge=lfs -text
+mandato_textos.npy filter=lfs diff=lfs merge=lfs -text
