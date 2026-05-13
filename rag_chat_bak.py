@@ -3,25 +3,18 @@ import numpy as np
 import faiss
 from ollama import Client
 from typing import Generator
-from dotenv import load_dotenv
-import os
-
-# Carrega .env para uso local (caso não esteja no Streamlit Cloud)
-load_dotenv()
 
 # Importamos o carregador e o helper do modelo que definimos no rag_builder
 from rag_builder import carregar_base_rag, _get_model
 
-# ---------------------------------
+# -------------------------------------------------
 # Configurações de cliente Ollama
-# ---------------------------------
-# Busca a chave no st.secrets (padrão Streamlit) ou no .env
-OLLAMA_KEY = os.getenv("OLLAMA_API_KEY")
-if not OLLAMA_KEY:
-    try:
-        OLLAMA_KEY = st.secrets["OLLAMA_API_KEY"]
-    except:
-        OLLAMA_KEY = ""
+# -------------------------------------------------
+# Busca a chave no st.secrets (padrão Streamlit)
+try:
+    OLLAMA_KEY = st.secrets["OLLAMA_API_KEY"]
+except:
+    OLLAMA_KEY = ""
 
 client = Client(
     host="https://ollama.com",
@@ -49,12 +42,11 @@ def obter_contexto(duvida: str, index: faiss.Index, base_texto: list[str], k: in
     """
     Realiza a busca semântica e retorna o contexto formatado.
     """
-    # Limpamos a query para focar no assunto/localidade
+    # Limpamos a query para focar no assunto/localidade, evitando viés do nome
     query_para_busca = limpar_query(duvida)
     
-    # Adaptado para o novo GeminiEncoder no rag_builder.py
-    # O prefixo 'Query:' ativa a formatação de tarefa no encoder
-    query_input = f"Query: {query_para_busca}"
+    instrucao = "Represent this query for retrieving relevant documents"
+    query_input = f"Instruct: {instrucao}\nQuery: {query_para_busca}"
 
     model = _get_model()
     query_vector = model.encode([query_input])
@@ -74,24 +66,24 @@ def gerar_resposta_streaming(
     Gerador que encapsula a lógica de RAG e streaming do Ollama.
     """
     contexto = obter_contexto(duvida, index, base_texto)
-    
+
     prompt = f"""
     Você é um Auditor de Dados Parlamentares. Sua prioridade absoluta é a precisão geográfica. Você prefere dizer que não sabe a dar uma resposta de uma cidade errada.
 
-    ### CONTEXTO IMPORTANTE:
+    ### 🛡️ CONTEXTO IMPORTANTE:
     Toda a base de dados abaixo refere-se EXCLUSIVAMENTE a ações, obras e investimentos do mandato do deputado **Max Maciel**. Se a informação está no contexto, ela é de autoria dele.
 
-    ### REGRAS DE OURO DE VALIDAÇÃO:
+    ### 🛡️ REGRAS DE OURO DE VALIDAÇÃO:
     1. **FILTRO DE LOCALIDADE ESTREITO:** Analise a PERGUNTA e o CONTEXTO. Se o usuário perguntou sobre uma cidade (ex: Guará) e o contexto fala de outra (ex: Ceilândia), você NÃO deve responder com os dados da outra, mesmo que os nomes sejam parecidos.
     2. **VERIFICAÇÃO DE "MATCH":** Antes de escrever qualquer item, confirme se ele está listado abaixo do título da Região Administrativa correta no contexto.
     3. **EXAUSTIVIDADE LITERAL:** Se a cidade for a correta, liste todos os itens individualmente (escolas, praças, obras). Não agrupe nem resuma. 
     4. **DESTAQUE FINANCEIRO:** Valores (R$) e "Emendas" devem estar em **NEGRITO**.
 
-    ### FORMATO DE RESPOSTA:
+    ### 📝 FORMATO DE RESPOSTA:
     **[NOME DA REGIÃO ADMINISTRATIVA]**
-    * [CATEGORIA]
-        * [Ação detalhada exatamente como no texto]
-        * **Investimento:** [Valor se houver]
+    * 📂 **[CATEGORIA]**
+        * ✅ [Ação detalhada exatamente como no texto]
+        * 💰 **Investimento:** [Valor se houver]
 
     ---
     ### CONTEXTO RECUPERADO PARA ANÁLISE:

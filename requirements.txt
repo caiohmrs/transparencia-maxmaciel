@@ -4,3 +4,5 @@ sentence-transformers
 docx2txt
 ollama
 numpy
+google-genai
+python-dotenv
