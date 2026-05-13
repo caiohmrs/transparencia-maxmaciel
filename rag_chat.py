@@ -24,7 +24,7 @@ client = Client(
 )
 
 # Configurações globais
-MODEL_LLM = "gpt-oss:120b"
+MODEL_LLM = "gemma4:31b-cloud"
 
 
 def obter_contexto(duvida: str, index: faiss.Index, base_texto: list[str], k: int = 15) -> str:
