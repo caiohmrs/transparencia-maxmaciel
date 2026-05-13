@@ -2,6 +2,7 @@ streamlit>=1.30
 faiss-cpu
 sentence-transformers
 torch
+torchvision
 docx2txt
 ollama
 numpy
