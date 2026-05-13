@@ -19,16 +19,25 @@ DIMENSION = 768  # Usando 768 para eficiência (Matryoshka)
 
 # Inicialização do Cliente Gemini
 def _get_client():
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        try:
-            import streamlit as st
+    """
+    Obtém o cliente Gemini priorizando st.secrets (Streamlit) e depois variáveis de ambiente (.env).
+    """
+    api_key = None
+    
+    # Tenta obter do st.secrets primeiro (mais comum em produção Streamlit)
+    try:
+        import streamlit as st
+        if "GEMINI_API_KEY" in st.secrets:
             api_key = st.secrets["GEMINI_API_KEY"]
-        except:
-            pass
+    except:
+        pass
+        
+    # Se não encontrou, tenta variável de ambiente (local .env)
+    if not api_key:
+        api_key = os.getenv("GEMINI_API_KEY")
     
     if not api_key:
-        raise ValueError("GEMINI_API_KEY não encontrada no .env ou st.secrets")
+        raise ValueError("ERRO: GEMINI_API_KEY não encontrada. Configure no .streamlit/secrets.toml ou no arquivo .env")
     
     return genai.Client(api_key=api_key)
 

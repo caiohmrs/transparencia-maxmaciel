@@ -9,3 +9,6 @@ venv
 __pycache__
 .aider.tags.cache.v4
 .streamlit/secrets.toml
+scratch
+emb-gemini.md
+README.md
