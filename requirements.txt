@@ -1,8 +1,10 @@
 streamlit>=1.30
 faiss-cpu
 sentence-transformers
+torch
 docx2txt
 ollama
 numpy
 google-genai
 python-dotenv
+pandas

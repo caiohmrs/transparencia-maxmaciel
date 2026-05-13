@@ -10,7 +10,7 @@ import os
 load_dotenv()
 
 # Importamos o carregador e o helper do modelo que definimos no rag_builder
-from rag_builder import carregar_base_rag, _get_model
+from rag_builder import carregar_base_rag, get_encoder
 
 # ---------------------------------
 # Configurações de cliente Ollama
@@ -56,7 +56,7 @@ def obter_contexto(duvida: str, index: faiss.Index, base_texto: list[str], k: in
     # O prefixo 'Query:' ativa a formatação de tarefa no encoder
     query_input = f"Query: {query_para_busca}"
 
-    model = _get_model()
+    model = get_encoder()
     query_vector = model.encode([query_input])
 
     # Busca os k fragmentos mais próximos

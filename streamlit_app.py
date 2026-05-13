@@ -1,5 +1,5 @@
 import streamlit as st
-from app import Home, Detalhes, Chat
+from app import Home, Detalhes, Chat, pdaf
 
 # -------------------------------------------------
 # 🎨 Identidade Visual - Max Maciel (Pop Art / Mandato)
@@ -287,7 +287,7 @@ st.markdown(BRAND_CSS, unsafe_allow_html=True)
 st.sidebar.title("🏛️ MENU")
 opcao = st.sidebar.radio(
     "Escolha a seção",
-    ("🏠 Home – Visão geral", "📚 Busca detalhada", "💬 MAX.IA"),
+    ("🏠 Home – Visão geral", "📚 Busca detalhada", "💰 Investimentos PDAF", "💬 MAX.IA"),
     index=0,
 )
 
@@ -311,5 +311,7 @@ if opcao == "🏠 Home – Visão geral":
     Home.page()
 elif opcao == "📚 Busca detalhada":
     Detalhes.page()
+elif opcao == "💰 Investimentos PDAF":
+    pdaf.page()
 else:
     Chat.page()

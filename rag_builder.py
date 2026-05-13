@@ -1,8 +1,7 @@
 import os
 import faiss
 import numpy as np
-from google import genai
-from google.genai import types
+from sentence_transformers import SentenceTransformer
 from dotenv import load_dotenv
 
 # Carrega variáveis de ambiente do .env se existir
@@ -11,91 +10,61 @@ load_dotenv()
 # ---------------------------------
 # Configurações
 # ---------------------------------
-MODEL_NAME = "gemini-embedding-2"
+# Mudando para modelo local do Hugging Face para evitar quota e problemas de caracteres
+MODEL_NAME = "google/embeddinggemma-300m"
 INDEX_FILE = "mandato_index.faiss"
 TEXTS_FILE = "mandato_textos.npy"
-DOC_PATH = "DADOS_RA_ORGANIZADO.md"
-DIMENSION = 768  # Usando 768 para eficiência (Matryoshka)
-
-# Inicialização do Cliente Gemini
-def _get_client():
-    """
-    Obtém o cliente Gemini priorizando st.secrets (Streamlit) e depois variáveis de ambiente (.env).
-    """
-    api_key = None
-    
-    # Tenta obter do st.secrets primeiro (mais comum em produção Streamlit)
-    try:
-        import streamlit as st
-        if "GEMINI_API_KEY" in st.secrets:
-            api_key = st.secrets["GEMINI_API_KEY"]
-    except:
-        pass
-        
-    # Se não encontrou, tenta variável de ambiente (local .env)
-    if not api_key:
-        api_key = os.getenv("GEMINI_API_KEY")
-    
-    if not api_key:
-        raise ValueError("ERRO: GEMINI_API_KEY não encontrada. Configure no .streamlit/secrets.toml ou no arquivo .env")
-    
-    return genai.Client(api_key=api_key)
-
-client_genai = _get_client()
+DOC_PATHS = ["DADOS_RA_ORGANIZADO.md", "DADOS_PDAF_CONSOLIDADO.md"]
+DIMENSION = 768  # Confirmado que o embeddinggemma-300m usa 768
 
 def _get_model():
     """
-    Mantido para compatibilidade com rag_chat.py.
-    Retorna um objeto com método encode para simular o comportamento do SentenceTransformer.
+    Carrega o modelo local do Hugging Face.
     """
-    class GeminiEncoder:
-        def encode(self, texts: list[str]) -> np.ndarray:
-            # Para consultas (queries), usamos o formato de query
-            formatted_texts = []
-            for t in texts:
-                if "Query:" in t:
-                    query_content = t.split("Query:")[1].strip()
-                    formatted_texts.append(f"task: search result | query: {query_content}")
-                else:
-                    formatted_texts.append(t)
+    token = os.getenv("HF_TOKEN")
+    if not token:
+        print("[AVISO] HF_TOKEN não encontrado. Se o modelo for gated, o carregamento falhará.")
+    
+    # Carrega o modelo via SentenceTransformers
+    print(f"[INFO] Carregando modelo local {MODEL_NAME}...")
+    model = SentenceTransformer(MODEL_NAME, use_auth_token=token)
+    return model
 
-            # Para garantir embeddings separados para cada item na lista (se houver mais de um)
-            # usamos a estrutura de Content objects
-            contents = [types.Content(parts=[types.Part.from_text(text=t)]) for t in formatted_texts]
+# Cache do modelo para não recarregar toda vez
+_model_cache = None
 
-            response = client_genai.models.embed_content(
-                model=MODEL_NAME,
-                contents=contents,
-                config=types.EmbedContentConfig(output_dimensionality=DIMENSION)
-            )
-            return np.array([e.values for e in response.embeddings]).astype("float32")
-
-    return GeminiEncoder()
-
+def get_encoder():
+    global _model_cache
+    if _model_cache is None:
+        _model_cache = _get_model()
+    return _model_cache
 
 def preparar_conhecimento_ra() -> list[str]:
-    if not os.path.exists(DOC_PATH):
-        raise FileNotFoundError(f"Arquivo {DOC_PATH} não encontrado.")
-
-    print("[INFO] Lendo Markdown otimizado...")
     textos_processados: list[str] = []
 
-    with open(DOC_PATH, "r", encoding="utf-8") as f:
-        for linha in f:
-            linha_limpa = linha.strip()
-            if linha_limpa.startswith("* ["):
-                conteudo = linha_limpa.lstrip("* ").strip()
-                
-                # Extrai a RA do formato [RA] [Tema] ...
-                try:
-                    ra = conteudo.split("]")[0].strip("[")
-                    doc_formatado = f"title: {ra} | text: {conteudo}"
-                except:
-                    doc_formatado = f"title: none | text: {conteudo}"
-                
-                textos_processados.append(doc_formatado)
+    for path in DOC_PATHS:
+        if not os.path.exists(path):
+            print(f"[AVISO] Arquivo {path} não encontrado. Pulando...")
+            continue
 
-    print(f"[OK] {len(textos_processados)} fragmentos extraídos com sucesso.")
+        print(f"[INFO] Lendo {path}...")
+        with open(path, "r", encoding="utf-8") as f:
+            for linha in f:
+                linha_limpa = linha.strip()
+                if linha_limpa.startswith("* ["):
+                    conteudo = linha_limpa.lstrip("* ").strip()
+                    
+                    # Extrai a RA do formato [RA] [Tema] ...
+                    try:
+                        ra = conteudo.split("]")[0].strip("[")
+                        # Formato title/text para consistência (embora o modelo local não exija prefixos específicos da API)
+                        doc_formatado = f"title: {ra} | text: {conteudo}"
+                    except:
+                        doc_formatado = f"title: none | text: {conteudo}"
+                    
+                    textos_processados.append(doc_formatado)
+
+    print(f"[OK] {len(textos_processados)} fragmentos extraídos no total.")
     return textos_processados
 
 
@@ -110,29 +79,22 @@ def carregar_base_rag() -> tuple[faiss.Index, list[str]]:
         else:
             print(f"[AVISO] Dimensão do index ({index.d}) diferente da configurada ({DIMENSION}). Recriando...")
 
-    print("[INFO] Gerando nova base RAG com Gemini...")
+    print("[INFO] Gerando nova base RAG com modelo local (Gemma)...")
     base_texto = preparar_conhecimento_ra()
-
-    print("[INFO] Gerando embeddings (isso pode levar alguns segundos)...")
-    all_embeddings = []
-    batch_size = 50
-    for i in range(0, len(base_texto), batch_size):
-        batch = base_texto[i:i + batch_size]
-        
-        # IMPORTANTE: No gemini-embedding-2, passar uma lista de strings resulta em AGREGAÇÃO.
-        # Para obter embeddings separados, devemos passar Content objects.
-        contents = [types.Content(parts=[types.Part.from_text(text=t)]) for t in batch]
-        
-        response = client_genai.models.embed_content(
-            model=MODEL_NAME,
-            contents=contents,
-            config=types.EmbedContentConfig(output_dimensionality=DIMENSION)
-        )
-        all_embeddings.extend([e.values for e in response.embeddings])
-
-    embeddings_np = np.array(all_embeddings).astype("float32")
     
-    # Normalização para Inner Product
+    model = get_encoder()
+
+    print("[INFO] Gerando embeddings localmente (sem limite de quota)...")
+    # O SentenceTransformer já lida com batching internamente, mas podemos passar tudo de uma vez
+    # ou em blocos se a memória for um problema.
+    embeddings_np = model.encode(
+        base_texto, 
+        batch_size=32, 
+        show_progress_bar=True, 
+        convert_to_numpy=True
+    ).astype("float32")
+    
+    # Normalização para Inner Product (Cosine Similarity)
     faiss.normalize_L2(embeddings_np)
     
     index = faiss.IndexFlatIP(DIMENSION)
@@ -140,7 +102,7 @@ def carregar_base_rag() -> tuple[faiss.Index, list[str]]:
 
     faiss.write_index(index, INDEX_FILE)
     np.save(TEXTS_FILE, base_texto)
-    print("[OK] Base RAG criada e persistida com sucesso.")
+    print("[OK] Base RAG criada e persistida com sucesso localmente.")
     return index, base_texto
 
 
