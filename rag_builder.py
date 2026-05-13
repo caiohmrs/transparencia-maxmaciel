@@ -22,6 +22,16 @@ def _get_model():
     Carrega o modelo local do Hugging Face.
     """
     token = os.getenv("HF_TOKEN")
+    
+    # Se não encontrar no env (local), tenta no st.secrets (Streamlit Cloud)
+    if not token:
+        try:
+            import streamlit as st
+            if "HF_TOKEN" in st.secrets:
+                token = st.secrets["HF_TOKEN"]
+        except:
+            pass
+
     if not token:
         print("[AVISO] HF_TOKEN não encontrado. Se o modelo for gated, o carregamento falhará.")
     
